@@ -399,6 +399,41 @@ def encode_spec_train(ibatch, n_latent, i_model):
     return None 
 
 
+def encode_spec_spender_train(ibatch): 
+    ''' encode noisy training spectra
+    '''
+    cntnt = '\n'.join([
+        "#!/bin/bash", 
+        "#SBATCH -J enc_spec_spender.train%i" % (ibatch), 
+        "#SBATCH --partition=general",
+        "#SBATCH --time=06:59:59", 
+        "#SBATCH --export=ALL", 
+        "#SBATCH --mem-per-cpu=20G", #"#SBATCH --gres=gpu:1", 
+        "#SBATCH --output=o/enc_spec_spender.train%i.o" % (ibatch), 
+        "#SBATCH --mail-type=all", 
+        "#SBATCH --mail-user=chhahn@princeton.edu", 
+        "", 
+        'now=$(date +"%T")', 
+        'echo "start time ... $now"', 
+        "", 
+        "source ~/.bashrc", 
+        "conda activate torch-env", 
+        "",
+        "python /home/chhahn/projects/SEDflow_p/data/process_train.py encode_spec_spender %i" % ibatch,
+        "",
+        'now=$(date +"%T")', 
+        'echo "end time ... $now"', 
+        ""]) 
+
+    # create the slurm script execute it and remove it
+    f = open('_train.slurm','w')
+    f.write(cntnt)
+    f.close()
+    os.system('sbatch _train.slurm')
+    os.system('rm _train.slurm')
+    return None 
+
+
 def encode_sdss(): 
     ''' deploy encode_sed_sdss_ivar_nde.py on adroit 
     '''
@@ -574,14 +609,23 @@ def compile_test():
 #    sample_nde_noise(101, i, 'best')
 
 # apply NDE noise 
-for i in range(10): 
-    apply_nde_noise(i, 5, 8)
-apply_nde_noise(101, 5, 8)
+#for i in range(10): 
+#    apply_nde_noise(i, 5, 8)
+#apply_nde_noise(101, 5, 8)
 
-# encoded noisy spectra 
+#------------------------------------------------
+# encode noisy spectra 
+
 #for i in range(10): 
 #    encode_spec_train(i, 10, 3)
 #encode_spec_train(101, 10, 3)
+
+# using spender 
+encode_spec_spender_train(0)
+for i in range(2, 10): 
+    encode_spec_spender_train(i)
+encode_spec_spender_train(101)
+
 
 # encoded noisy spectra using regression compressor 
 #for i in range(10): 

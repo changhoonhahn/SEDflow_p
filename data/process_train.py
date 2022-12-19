@@ -186,6 +186,57 @@ def encode_spec(ibatch, n_latent, i_model):
     return None 
 
 
+def encode_spec_spender(ibatch): 
+    ''' encode training spectrum using spender encoder 
+    '''
+    import spender
+    from tqdm.auto import trange
+    from spender.data.sdss import SDSS
+    if torch.cuda.is_available(): 
+        device = torch.device('cuda:0') 
+    else: 
+        device = torch.device('cpu') 
+
+    dat_dir = '/scratch/network/chhahn/sedflow/training_sed/'
+    wave = np.load('/scratch/network/chhahn/sedflow/sdss.clean.wave.npy')
+    spec = np.load(os.path.join(dat_dir, f'train.v0.1.{ibatch}.seds.nde_noise.npy')).astype(np.float32)
+    ivar = np.load(os.path.join(dat_dir, f'train.v0.1.{ibatch}.ivar.nde_noise.npy')).astype(np.float32)
+    zred = np.load(os.path.join(dat_dir, f'train.v0.1.{ibatch}.redshifts.npy'))
+    
+    # calculate norm 
+    norm = np.empty(spec.shape[0])
+    for i in range(spec.shape[0]): 
+        wave_rest = wave / (1 + zred[i])
+        
+        sel = (wave_rest > 5300.) & (wave_rest < 5850.)
+        norm[i] = np.median(spec[i][sel])
+
+    # load spender
+    sdss = SDSS()
+    auto, loss = spender.load_model('/scratch/network/chhahn/sedflow/sdss.speculator+1.variable.lr_1e-3.latent_10.0.pt', 
+                          instrument=sdss, device=device)
+    
+    # pad
+    _spec = torch.zeros((spec.shape[0], len(sdss.wave_obs)))
+
+    start = int(np.around((np.log10(wave)[0] - torch.log10(sdss.wave_obs[0]).item())/0.0001))
+    end = min(start+len(np.log10(wave)), len(sdss.wave_obs))
+
+    _spec[:,start:end]= torch.from_numpy(spec/norm[:,None])
+    
+    s_spec = []
+    for ichunk in trange(100):
+        with torch.no_grad():
+            _s = auto.encode(_spec[ichunk*1000:(ichunk+1)*1000],
+                            aux=torch.tensor(zred[ichunk*1000:(ichunk+1)*1000].astype(np.float32)).unsqueeze(1))
+            s_spec.append(_s)
+    s_spec = np.concatenate([s.detach().numpy() for s in s_spec])
+
+    np.save(os.path.join(dat_dir, f'train.v0.1.{ibatch}.h_spec.nde_noise.spender.npy'), s_spec)
+    np.save(os.path.join(dat_dir, f'train.v0.1.{ibatch}.norm_spec.nde_noise.spender.npy'), norm)
+    return None 
+    
+
 def encode_spec_regression(ibatch, i_model): 
     ''' encode trianing spec using trained autoencoder
     '''
@@ -279,6 +330,9 @@ if __name__=="__main__":
         n_latent = int(sys.argv[3])
         i_model  = int(sys.argv[4])
         encode_spec(ibatch, n_latent, i_model)
+    elif task == 'encode_spec_spender': 
+        ibatch   = int(sys.argv[2])
+        encode_spec_spender(ibatch)
     elif task == 'encode_spec_reg': 
         sys.path.append('/home/chhahn/projects/SEDflow/docs/nb/spectra/spectrum-encoder/')
         from model import SpectrumEncoder 
